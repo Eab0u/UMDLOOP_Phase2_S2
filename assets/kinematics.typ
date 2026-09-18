@@ -189,7 +189,25 @@ $
 forward kinematics of the arm can be calculated pretty easily, starting with 2D, we can just use basic trigonometry, making sure to convert the joint angles, into angles relative to the $r$-axis
 
 $
-  arrow(p_2) = vec(cos(theta_1), sin(theta_1), delim: "[") + vec(cos(theta_1 + theta_2), sin(theta_1 + theta_2), delim: "[")
+  arrow(p_2) = L_1 vec(
+    delim: "[",
+    cos(theta_1),
+    sin(theta_1),
+  ) + L_2 vec(
+    delim: "[",
+    cos(theta_1 + theta_2),
+    sin(theta_1 + theta_2),
+  )
 $
 
+To convert that from 2D to 3D we need to change the frame of reference from the $r z$ plane to $x y z$ space, and to do this we can just rotate $r$ by $theta_0$ to go from the $r$-axis to the $x y$ plane, resulting in this as the final equations for forward kinematics
+
+$
+  arrow(p_2) = vec(
+    delim: "[",
+    [L_1 cos(theta_1) + L_2 cos(theta_1 + theta_2)] cos(theta_0),
+    [L_1 cos(theta_1) + L_2 cos(theta_1 + theta_2)] sin(theta_0),
+    L_1 sin(theta_1) + L_2 sin(theta_1 + theta_2)
+  )
+$
 
