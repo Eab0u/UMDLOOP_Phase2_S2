@@ -15,13 +15,21 @@ from my_typist.kinematics import ArmKinematics
 from my_typist.pid import PID
 from my_typist.data import (
     BASE_HEIGHT,
+    DISTANCE_FROM_KEYBOARD,
     DT,
     FOREARM,
+    HEAD_PAN_LIMIT,
+    HEAD_TILT_LIMIT,
     JOINT_NAMES,
+    KEY_LAYOUT,
+    KEY_UNIT,
+    KEYBOARD_CENTER_OFFSET,
+    KEYBOARD_VIEW_OFFSET,
     STYLUS_MAX_REACH,
     STYLUS_MIN_REACH,
     UPPER_ARM,
     cross,
+    dist,
 )
 
 
@@ -29,7 +37,7 @@ KEYBOARD_CORNERS = [
     (0.97, 0.17, 0.39),
     (0.97, -0.14, 0.43),
     (0.97, -0.15, 0.32),
-    (0.93, 0.16, 0.32),
+    (0.97, 0.12, 0.30),
 ]
 
 
@@ -42,6 +50,7 @@ class Typist(Node):
         self.declare_parameter("kd", 0.1)
 
         self.arm_target = (0, 0, 0)
+        self.stylus_target = (0, 0, 0)
         kp = self.get_parameter("kp").value
         ki = self.get_parameter("ki").value
         kd = self.get_parameter("kd").value
@@ -75,9 +84,17 @@ class Typist(Node):
 
     def setup(self):
         self.get_arm_target(*KEYBOARD_CORNERS)
+        # self.get_stylus_target("J", *KEYBOARD_CORNERS)
+        self.stylus_target = KEYBOARD_CORNERS[3]
 
         q_des = self.kinematics.get_arm_joint_positions(*self.arm_target) or []
         print(f"Arm Angles: {[math.degrees(x) for x in q_des]}")
+        if len(q_des) > 0:
+            q_des = (
+                self.kinematics.get_stylus_joint_positions(*self.stylus_target, *q_des)
+                or []
+            )
+            print(f"Stylus Angles: {[math.degrees(x) for x in q_des]}")
 
         self.create_timer(DT, self.control_loop)
 
@@ -93,7 +110,10 @@ class Typist(Node):
             self.get_logger().error("bad keyboard corners, no left axis")
             return
         left = [a / row_len for a in row]
-        keyboard_center = tuple(a + b * 0.025 for a, b in zip(keyboard_center, left))
+        keyboard_center = [
+            a + b * KEYBOARD_CENTER_OFFSET for a, b in zip(keyboard_center, left)
+        ]
+        keyboard_center[2] += KEYBOARD_VIEW_OFFSET
         self.get_logger().info(f"Keyboard Center: {keyboard_center}")
         edge1 = [a - b for a, b in zip(kb_tr, kb_tl)]
         edge2 = [a - b for a, b in zip(kb_bl, kb_tl)]
@@ -111,39 +131,23 @@ class Typist(Node):
 
         arm_reach = FOREARM + UPPER_ARM
         arm_margin = 0.02
-        stylus_lo = STYLUS_MIN_REACH + 0.01
-        stylus_hi = STYLUS_MAX_REACH - 0.01
 
-        def dist(a, b):
-            return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+        candidate = [
+            a + b * DISTANCE_FROM_KEYBOARD for a, b in zip(keyboard_center, normal)
+        ]
+        over = dist(candidate, shoulder) - (arm_reach - arm_margin)
+        if over > 0.0:
+            direction = [
+                (a - b) / dist(candidate, shoulder) for a, b in zip(candidate, shoulder)
+            ]
+            candidate = [a - b * over for a, b in zip(candidate, direction)]
+        self.arm_target = candidate
 
-        def is_feasible(p):
-            if dist(p, shoulder) >= arm_reach - arm_margin:
-                return False
-            if self.kinematics.get_arm_joint_positions(*p) is None:
-                return False
-            return all(stylus_lo < dist(c, p) < stylus_hi for c in corners)
-
-        self.arm_target = None
-        standoff = 0.05
-        while standoff <= 0.40:
-            candidate = [a + b * standoff for a, b in zip(keyboard_center, normal)]
-            if is_feasible(candidate):
-                self.arm_target = candidate
-                break
-            standoff += 0.005
-
-        if self.arm_target is None:
-            candidate = [a + b * 0.05 for a, b in zip(keyboard_center, normal)]
-            over = dist(candidate, shoulder) - (arm_reach - arm_margin)
-            if over > 0.0:
-                direction = [
-                    (a - b) / dist(candidate, shoulder)
-                    for a, b in zip(candidate, shoulder)
-                ]
-                candidate = [a - b * over for a, b in zip(candidate, direction)]
-            self.arm_target = candidate
-            self.get_logger().error("not all corners are reachable")
+        if not all(
+            STYLUS_MIN_REACH <= dist(corner, self.arm_target) <= STYLUS_MAX_REACH
+            for corner in corners
+        ):
+            self.get_logger().error("not all corners are within stylus range")
 
         self.get_logger().info(f"Arm Target: {self.arm_target}")
 
@@ -152,6 +156,36 @@ class Typist(Node):
             for corner in corners
         ):
             self.get_logger().error("not all corners are reachable")
+
+    def get_stylus_target(self, key, kb_tl, kb_tr, kb_br, kb_bl):
+        key = key.upper()
+        if key not in KEY_LAYOUT:
+            self.get_logger().error(f"Unknown key: {key}")
+            return
+
+        x, y, width = KEY_LAYOUT[key]
+
+        # Keyboard layout dimensions.
+        # Main keyboard: x = 0..15, y = 0..6.25
+        # Navigation cluster: x = 15.25..18.5
+        if x >= 15.25:
+            x_min, x_max = 15.25, 18.5
+        else:
+            x_min, x_max = 0.0, 15.0
+
+        y_min, y_max = 0.0, 6.25
+
+        # Center of the key in layout coordinates.
+        u = (x + width / 2.0 - x_min) / (x_max - x_min)
+        v = (y + 0.5 - y_min) / (y_max - y_min)
+
+        # Bilinear interpolation over the keyboard surface.
+        top = [kb_tl[i] + u * (kb_tr[i] - kb_tl[i]) for i in range(3)]
+        bottom = [kb_bl[i] + u * (kb_br[i] - kb_bl[i]) for i in range(3)]
+
+        self.stylus_target = tuple(top[i] + v * (bottom[i] - top[i]) for i in range(3))
+
+        self.get_logger().info(f"Stylus Target: {self.stylus_target}")
 
     def joint_state_callback(self, msg: JointState) -> None:
         state = dict(zip(msg.name, msg.position))
@@ -163,14 +197,28 @@ class Typist(Node):
 
     def control_loop(self) -> None:
         velocities = [0.0] * len(JOINT_NAMES)
-        q_des = self.kinematics.get_arm_joint_positions(*self.arm_target)
-        if q_des is None:
+
+        q_arm = self.kinematics.get_arm_joint_positions(*self.arm_target)
+        if q_arm is None:
             self.get_logger().warning("target out of reach", throttle_duration_sec=1.0)
-        else:
-            for i, pid in enumerate(self.pids):
-                if i >= len(q_des):
-                    continue
-                velocities[i] = pid.update(q_des[i] - self.q[i], DT)
+            return
+
+        q_stylus = self.kinematics.get_stylus_joint_positions(
+            *self.stylus_target, *q_arm
+        )
+        if q_stylus is None:
+            self.get_logger().warning(
+                "stylus cannot reach from desired arm pose",
+                throttle_duration_sec=1.0,
+            )
+            return
+
+        q_des = list(q_arm) + list(q_stylus)
+
+        for i, pid in enumerate(self.pids):
+            if i >= len(q_des):
+                continue
+            velocities[i] = pid.update(q_des[i] - self.q[i], DT)
 
         msg = JointVelocityCommand()
         msg.header.stamp = self.get_clock().now().to_msg()

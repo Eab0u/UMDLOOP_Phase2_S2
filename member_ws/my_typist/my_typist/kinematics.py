@@ -34,7 +34,7 @@ class ArmKinematics:
         ):
             return None
 
-        return (theta0, theta1, theta2)
+        return [theta0, theta1, theta2]
 
     def get_arm_location(self, theta0, theta1, theta2):
         pr = UPPER_ARM * math.cos(theta1) + FOREARM * math.cos(theta1 + theta2)
@@ -48,35 +48,56 @@ class ArmKinematics:
         return (x, y, z)
 
     def get_stylus_joint_positions(self, x, y, z, q0, q1, q2):
-        tx, ty, tz = x, y, z
-        c0, s0 = math.cos(q0), math.sin(q0)
-        c1, s1 = math.cos(q1), math.sin(q1)
-
         px, py, pz = self.get_arm_location(q0, q1, q2)
-        ex = UPPER_ARM * c1 * c0
-        ey = UPPER_ARM * c1 * s0
-        ez = UPPER_ARM * s1 + BASE_HEIGHT
 
-        x_head = (
-            (px - ex) / FOREARM,
-            (py - ey) / FOREARM,
-            (pz - ez) / FOREARM,
-        )
-        y_head = (-s0, c0, 0.0)
-        z_head = (
-            y_head[1] * x_head[2] - y_head[2] * x_head[1],
-            y_head[2] * x_head[0] - y_head[0] * x_head[2],
-            y_head[0] * x_head[1] - y_head[1] * x_head[0],
+        # Direction from the stylus/head to the target.
+        vx = x - px
+        vy = y - py
+        vz = z - pz
+
+        length = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if length < 1e-9:
+            return None
+
+        vx /= length
+        vy /= length
+        vz /= length
+
+        # Direction the head is pointing before applying head pan/tilt.
+        phi = q1 + q2
+        c0 = math.cos(q0)
+        s0 = math.sin(q0)
+
+        forward = (
+            math.cos(phi) * c0,
+            math.cos(phi) * s0,
+            math.sin(phi),
         )
 
-        v = (tx - px, ty - py, tz - pz)
-        vx = v[0] * x_head[0] + v[1] * x_head[1] + v[2] * x_head[2]
-        vy = v[0] * y_head[0] + v[1] * y_head[1] + v[2] * y_head[2]
-        vz = v[0] * z_head[0] + v[1] * z_head[1] + v[2] * z_head[2]
-
-        pan = max(-HEAD_PAN_LIMIT, min(HEAD_PAN_LIMIT, math.atan2(vy, vx)))
-        tilt = max(
-            -HEAD_TILT_LIMIT,
-            min(HEAD_TILT_LIMIT, math.atan2(vz, math.hypot(vx, vy))),
+        right = (
+            -s0,
+            c0,
+            0.0,
         )
-        return pan, tilt
+
+        up = (
+            -math.sin(phi) * c0,
+            -math.sin(phi) * s0,
+            math.cos(phi),
+        )
+
+        # Express target direction in the head's coordinate frame.
+        fx = vx * forward[0] + vy * forward[1] + vz * forward[2]
+        fy = vx * right[0] + vy * right[1] + vz * right[2]
+        fz = vx * up[0] + vy * up[1] + vz * up[2]
+
+        pan = math.atan2(fy, fx)
+        tilt = math.atan2(fz, math.hypot(fx, fy))
+
+        # if not -HEAD_PAN_LIMIT <= pan <= HEAD_PAN_LIMIT:
+        #     return None
+        #
+        # if not -HEAD_TILT_LIMIT <= tilt <= HEAD_TILT_LIMIT:
+        #     return None
+
+        return [pan, tilt]
