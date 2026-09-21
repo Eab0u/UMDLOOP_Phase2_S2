@@ -16,3 +16,6 @@ __pycache__/
 .pytest_cache/
 
 .DS_Store
+
+# logs
+control_log.csv
