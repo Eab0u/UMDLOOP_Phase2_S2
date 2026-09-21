@@ -112,12 +112,7 @@ class Typist(Node):
             ),
         )
 
-        self.setup()
-
-    def setup(self):
         self.get_arm_target(*KEYBOARD_CORNERS)
-        q_des = self.kinematics.get_arm_joint_positions(*self.arm_target) or []
-        print(f"Arm Angles: {[math.degrees(x) for x in q_des]}")
 
     def launch_key_callback(self, msg: String) -> None:
         self.launch_key = msg.data
@@ -228,8 +223,6 @@ class Typist(Node):
             + (1 - s) * t * kb_bl[2],
         )
 
-        self.get_logger().info(f"Stylus Target: {self.stylus_target}")
-
     def control_loop(self) -> None:
         velocities = [0.0] * len(JOINT_NAMES)
         if self.current_state == "get_target":
@@ -258,7 +251,7 @@ class Typist(Node):
                     return
                 else:
                     self.current_state = "get_target"
-        else:
+        elif self.current_state == "moving":
             q_arm = self.kinematics.get_arm_joint_positions(*self.arm_target)
             if q_arm is None:
                 self.get_logger().warning(
