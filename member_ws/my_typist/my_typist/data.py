@@ -21,6 +21,9 @@ JOINT_NAMES = [
     "head_tilt",
 ]
 
+# Hard per-joint velocity limits, rad/s (docs/INTERFACES.md section 3.1), same order as JOINT_NAMES.
+V_MAX = [0.6, 0.6, 0.8, 1.0, 1.0]
+
 RATE = 50.0
 DT = 1.0 / RATE
 
