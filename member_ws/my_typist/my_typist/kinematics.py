@@ -5,6 +5,8 @@ from my_typist.data import (
     FOREARM,
     HEAD_PAN_LIMIT,
     HEAD_TILT_LIMIT,
+    normalized,
+    solve,
 )
 
 
@@ -47,57 +49,39 @@ class ArmKinematics:
         )
         return (x, y, z)
 
-    def get_stylus_joint_positions(self, x, y, z, q0, q1, q2):
-        px, py, pz = self.get_arm_location(q0, q1, q2)
+    def get_stylus_aim(self, theta0, theta1, theta2, theta3, theta4):
+        c0, s0 = math.cos(theta0), math.sin(theta0)
+        phi = theta1 + theta2
+        x_head = (math.cos(phi) * c0, math.cos(phi) * s0, math.sin(phi))
+        y_head = (-s0, c0, 0)
+        z_head = (-math.sin(phi) * c0, -math.sin(phi) * s0, math.cos(phi))
 
-        # Direction from the stylus/head to the target.
-        vx = x - px
-        vy = y - py
-        vz = z - pz
-
-        length = math.sqrt(vx * vx + vy * vy + vz * vz)
-        if length < 1e-9:
-            return None
-
-        vx /= length
-        vy /= length
-        vz /= length
-
-        # Direction the head is pointing before applying head pan/tilt.
-        phi = q1 + q2
-        c0 = math.cos(q0)
-        s0 = math.sin(q0)
-
-        forward = (
-            math.cos(phi) * c0,
-            math.cos(phi) * s0,
-            math.sin(phi),
+        u_head = (
+            math.cos(theta4) * math.cos(theta3),
+            math.cos(theta4) * math.sin(theta3),
+            math.sin(theta4),
         )
 
-        right = (
-            -s0,
-            c0,
-            0.0,
+        aim_world = tuple(
+            x * u_head[0] + y * u_head[1] + z * u_head[2]
+            for x, y, z in zip(x_head, y_head, z_head)
         )
 
-        up = (
-            -math.sin(phi) * c0,
-            -math.sin(phi) * s0,
-            math.cos(phi),
-        )
+        return aim_world
 
-        # Express target direction in the head's coordinate frame.
-        fx = vx * forward[0] + vy * forward[1] + vz * forward[2]
-        fy = vx * right[0] + vy * right[1] + vz * right[2]
-        fz = vx * up[0] + vy * up[1] + vz * up[2]
+    def get_stylus_joint_positions(self, x, y, z, theta0, theta1, theta2):
+        p2 = self.get_arm_location(theta0, theta1, theta2)
+        p3 = (x, y, z)
+        c0, s0 = math.cos(theta0), math.sin(theta0)
+        phi = theta1 + theta2
+        uw = normalized([a - b for a, b in zip(p3, p2)])
+        R = [
+            [math.cos(phi) * c0, math.cos(phi) * s0, math.sin(phi)],
+            [-s0, c0, 0],
+            [-math.sin(phi) * c0, -math.sin(phi) * s0, math.cos(phi)],
+        ]
+        us = solve(R, uw)
 
-        pan = math.atan2(fy, fx)
-        tilt = math.atan2(fz, math.hypot(fx, fy))
-
-        # if not -HEAD_PAN_LIMIT <= pan <= HEAD_PAN_LIMIT:
-        #     return None
-        #
-        # if not -HEAD_TILT_LIMIT <= tilt <= HEAD_TILT_LIMIT:
-        #     return None
-
+        pan = math.atan2(us[1], us[0])
+        tilt = math.asin(us[2])
         return [pan, tilt]

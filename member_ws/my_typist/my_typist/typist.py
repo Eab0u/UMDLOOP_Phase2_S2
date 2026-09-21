@@ -85,7 +85,7 @@ class Typist(Node):
     def setup(self):
         self.get_arm_target(*KEYBOARD_CORNERS)
         # self.get_stylus_target("J", *KEYBOARD_CORNERS)
-        self.stylus_target = KEYBOARD_CORNERS[3]
+        self.stylus_target = KEYBOARD_CORNERS[0]
 
         q_des = self.kinematics.get_arm_joint_positions(*self.arm_target) or []
         print(f"Arm Angles: {[math.degrees(x) for x in q_des]}")

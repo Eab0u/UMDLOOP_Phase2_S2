@@ -1,4 +1,5 @@
 #import "@preview/cetz:0.5.2"
+#set math.equation(numbering: "(1)")
 
 = Inverse Kinematics of the Main Arm
 
@@ -158,7 +159,7 @@ To solve this first notice that $arrow(p_0)$, $arrow(p_1)$, and $arrow(p_2)$ mak
 
 $ d = |arrow(p_2) - arrow(p_0)| $
 
-Solve for $theta_2$
+To solve for $theta_2$
 
 $
                           d^2 & = L_1^2 + L_2^2 - 2 L_1 L_2 cos(pi - theta_2) \
@@ -168,8 +169,7 @@ $
                       theta_2 & = cos^(-1)((d^2 - L_1^2 - L^2^2) / (2 L_1 L_2))
 $
 
-Solve for $theta_1$ \
-First we solve for the interior angle of the triangle, opposite to $L_2$, the same way as we did for $theta_2$
+To solve for $theta_1$ we first solve for the interior angle of the triangle, opposite to $L_2$, the same way as we did for $theta_2$
 then to get the angle from the $r$-axis to $arrow(p_2)$, we can do $"atan2"(arrow(p_2))$. Therefore
 $ theta_1 = "atan2"(arrow(p_2)) + cos^(-1)((L_1^2 + d^2 - L_2^2) / (2 L_1 d)) $
 
@@ -210,4 +210,139 @@ $
     L_1 sin(theta_1) + L_2 sin(theta_1 + theta_2)
   )
 $
+
+#pagebreak()
+
+= Forward Kinematics of the Stylus
+
+#columns(2)[
+  #figure(
+    cetz.canvas({
+      import cetz.draw: *
+      import cetz.angle: angle
+
+      let stylus_max = 2.8
+      let stylus_min = 0.4
+
+      let point(pos, label: none, offset: (0.3, 0.3)) = {
+        circle(pos, radius: 0.08, fill: black, stroke: none)
+
+        if label != none {
+          content(
+            (
+              pos.at(0) + offset.at(0),
+              pos.at(1) + offset.at(1),
+            ),
+            label,
+            anchor: "center",
+          )
+        }
+      }
+
+      line((-2.5, -2.5), (2.5, -2.5), mark: (end: ">"))
+      line((-2.5, -2.5), (-2.5, 2.5), mark: (end: ">"))
+
+      let head = (-1.25, 0)
+      let tilt_limits_down = (
+        head.at(0) + stylus_max * calc.cos(-35deg),
+        head.at(1) + stylus_max * calc.sin(-35deg),
+      )
+      let tilt_limits_up = (
+        head.at(0) + stylus_max * calc.cos(35deg),
+        head.at(1) + stylus_max * calc.sin(35deg),
+      )
+      let tilt = (
+        head.at(0) + stylus_max * calc.cos(-30deg) * calc.cos(25deg),
+        head.at(1) + stylus_max * calc.cos(-30deg) * calc.sin(25deg),
+      )
+
+      line(head, tilt_limits_down, stroke: (dash: "dashed"))
+      line(head, tilt_limits_up, stroke: (dash: "dashed"))
+      line(head, (head.at(0) + 0.8, head.at(1)), stroke: (dash: "dashed"))
+      point(head, label: [$arrow(p_2)$], offset: (-0.3, 0))
+      line(head, tilt, mark: (end: ">"))
+      angle(head, (1.55, 0), tilt, radius: 0.8, label: [$theta_4$], label-radius: 1.1)
+      content((tilt.at(0) * 1.2, tilt.at(1) * 1.2), [$arrow(p_3)$])
+    }),
+    caption: "Side View of the Stylus",
+  )
+  #colbreak()
+  #figure(
+    cetz.canvas({
+      import cetz.draw: *
+      import cetz.angle: angle
+
+      let stylus_max = 2.8
+      let stylus_min = 0.4
+
+      let point(pos, label: none, offset: (0.3, 0.3)) = {
+        circle(pos, radius: 0.08, fill: black, stroke: none)
+
+        if label != none {
+          content(
+            (
+              pos.at(0) + offset.at(0),
+              pos.at(1) + offset.at(1),
+            ),
+            label,
+            anchor: "center",
+          )
+        }
+      }
+
+      line((-2.5, -2.5), (2.5, -2.5), mark: (end: ">"))
+      line((-2.5, -2.5), (-2.5, 2.5), mark: (end: ">"))
+
+      let head = (-1.25, 0)
+      let tilt_limits_down = (
+        head.at(0) + stylus_max * calc.cos(-45deg),
+        head.at(1) + stylus_max * calc.sin(-45deg),
+      )
+      let tilt_limits_up = (
+        head.at(0) + stylus_max * calc.cos(45deg),
+        head.at(1) + stylus_max * calc.sin(45deg),
+      )
+      let tilt = (
+        head.at(0) + stylus_max * calc.cos(25deg) * calc.cos(30deg),
+        head.at(1) + stylus_max * calc.cos(25deg) * calc.sin(30deg),
+      )
+
+      line(head, tilt_limits_down, stroke: (dash: "dashed"))
+      line(head, tilt_limits_up, stroke: (dash: "dashed"))
+      line(head, (head.at(0) + 0.8, head.at(1)), stroke: (dash: "dashed"))
+      point(head, label: [$arrow(p_2)$], offset: (-0.3, 0))
+      line(head, tilt, mark: (end: ">"))
+      angle(head, (1.55, 0), tilt, radius: 0.8, label: [$theta_3$], label-radius: 1.1)
+      content((tilt.at(0) * 1.2, tilt.at(1) * 1.2), [$arrow(p_3)$])
+    }),
+    caption: "Top View of the Stylus",
+  )
+]
+
+The kinematics of the stylus were given in the documentation, so copying it here:
+$ phi = theta_1 + theta_2 $
+$
+  bold(R_"head") = mat(delim: "[", cos(phi) cos(theta_0), cos(phi) sin(theta_0), sin(phi); -sin(theta_0), cos(theta_0), 0; -sin(phi) sin(theta_0), -sin(phi) cos(theta_0), cos(phi))
+$ <rotation_mat>
+$ arrow(u)_"stylus" = vec(cos(theta_4) cos(theta_3), cos(theta_4) sin(theta_3), sin(theta_4), delim: "[") $
+$ arrow(u)_"world" = bold(R_"head") arrow(u)_"stylus" $ <transform>
+$ arrow(p_3) = arrow(p_2) + r arrow(u)_"world" $ <project>
+where $r$ is the distance in the direction of the stylus from the head
+
+= Inverse Kinematics of the Stylus
+To invert the forward kinematics all we have to do is solve for $arrow(u)_"stylus"$ given $theta_0$, $theta_1$, $theta_2$ and $arrow(p_3)$
+
+Starting from equation @project we notice that $arrow(u)_"world"$ is normal so to get rid of $r$ we can just normalize
+$ arrow(u)_"world" = (arrow(p_3) - arrow(p_2)) / norm(arrow(p_3) - arrow(p_2)) $
+
+And then using equation @transform we can invert $bold(R_"head")$ to get
+$ arrow(u)_"stylus" = bold(R)^(-1)_bold("head") arrow(u)_"world" $
+
+And then converting $arrow(u)_"stylus"$ is just a matter of converting from rectangular coordinates to spherical
+$
+  theta_3 = arctan((arrow(u)_"stylus".y) / (arrow(u)_"stylus".x)) \
+  theta_4 = arcsin(z)
+$
+
+Now the only difficult part is solving for $bold(R)^(-1)_bold("head")$, however we don't need to do this as it is more efficient to solve the linear equation directly rather than use the inverse and matrix multiply. Especially since after entering it into a symbolic solver, the mathematical inverse is extremely long and unwieldy.
 
