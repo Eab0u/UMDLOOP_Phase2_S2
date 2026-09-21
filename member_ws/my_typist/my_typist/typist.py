@@ -13,6 +13,8 @@ from std_msgs.msg import String, Empty
 from autotype_msgs.msg import JointVelocityCommand
 from my_typist.kinematics import ArmKinematics
 from my_typist.pid import PID
+from my_typist.safety import StalenessWatchdog, is_safe_to_press, clamp_velocities
+from my_typist.mission_log import MissionLog
 from my_typist.data import (
     BASE_HEIGHT,
     DISTANCE_FROM_KEYBOARD,
@@ -26,6 +28,7 @@ from my_typist.data import (
     STYLUS_MAX_REACH,
     STYLUS_MIN_REACH,
     UPPER_ARM,
+    V_MAX,
     cross,
     dist,
 )
@@ -57,6 +60,8 @@ class Typist(Node):
         self.kinematics = ArmKinematics()
         self.pids = [PID(kp, ki, kd, dt=DT) for _ in range(len(JOINT_NAMES))]
         self.q = [0.0] * len(JOINT_NAMES)
+        self.joint_state_watchdog = StalenessWatchdog(timeout=10 * DT)
+        self.mission_log = MissionLog()
         self.launch_key = ""
         self.current_key = 0
         self.current_state = "idle"
@@ -125,6 +130,7 @@ class Typist(Node):
         self.create_timer(DT, self.control_loop)
 
     def joint_state_callback(self, msg: JointState) -> None:
+        self.joint_state_watchdog.touch(self.get_clock().now().nanoseconds / 1e9)
         state = dict(zip(msg.name, msg.position))
         for i, name in enumerate(JOINT_NAMES):
             if name in state:
@@ -224,6 +230,18 @@ class Typist(Node):
         )
 
     def control_loop(self) -> None:
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self.joint_state_watchdog.is_stale(now):
+            self.get_logger().error(
+                "/joint_states is stale; holding position", throttle_duration_sec=1.0
+            )
+            msg = JointVelocityCommand()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.name = JOINT_NAMES
+            msg.velocity = [0.0] * len(JOINT_NAMES)
+            self.joint_velocity_publisher.publish(msg)
+            return
+
         velocities = [0.0] * len(JOINT_NAMES)
         if self.current_state == "get_target":
             self.get_stylus_target(self.launch_key[self.current_key], *KEYBOARD_CORNERS)
@@ -241,6 +259,7 @@ class Typist(Node):
                     f"Pressing Key {self.launch_key[self.current_key]}"
                 )
                 self.key_press_publisher.publish(Empty())
+                self.mission_log.log_press(now, self.launch_key[self.current_key])
                 self.current_key += 1
                 if self.current_key >= len(self.launch_key):
                     self.get_logger().info(
@@ -276,7 +295,9 @@ class Typist(Node):
                     continue
                 velocities[i] = pid.update(q_des[i] - self.q[i], DT)
 
-            if all(abs(v) < 1e-2 for v in velocities):
+            velocities = clamp_velocities(velocities, V_MAX)
+
+            if is_safe_to_press(velocities):
                 self.idle_time = 0.5
                 self.current_state = "next"
 
@@ -285,6 +306,7 @@ class Typist(Node):
         msg.name = JOINT_NAMES
         msg.velocity = velocities
         self.joint_velocity_publisher.publish(msg)
+        self.mission_log.log_command(now, self.current_state, velocities)
 
 
 def main(args=None):
