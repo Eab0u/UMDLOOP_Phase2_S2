@@ -3,10 +3,6 @@ from my_typist.data import (
     BASE_HEIGHT,
     UPPER_ARM,
     FOREARM,
-    HEAD_PAN_LIMIT,
-    HEAD_TILT_LIMIT,
-    normalized,
-    solve,
 )
 
 
@@ -70,18 +66,25 @@ class ArmKinematics:
         return aim_world
 
     def get_stylus_joint_positions(self, x, y, z, theta0, theta1, theta2):
-        p2 = self.get_arm_location(theta0, theta1, theta2)
-        p3 = (x, y, z)
+        px, py, pz = self.get_arm_location(theta0, theta1, theta2)
+        vx, vy, vz = x - px, y - py, z - pz
+        n = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if n < 1e-12:
+            return [0.0, 0.0]
+        ux, uy, uz = vx / n, vy / n, vz / n
         c0, s0 = math.cos(theta0), math.sin(theta0)
         phi = theta1 + theta2
-        uw = normalized([a - b for a, b in zip(p3, p2)])
-        R = [
-            [math.cos(phi) * c0, math.cos(phi) * s0, math.sin(phi)],
-            [-s0, c0, 0],
-            [-math.sin(phi) * c0, -math.sin(phi) * s0, math.cos(phi)],
-        ]
-        us = solve(R, uw)
+        x_head = (math.cos(phi) * c0, math.cos(phi) * s0, math.sin(phi))
+        y_head = (-s0, c0, 0.0)
+        z_head = (
+            -math.sin(phi) * c0,
+            -math.sin(phi) * s0,
+            math.cos(phi),
+        )
+        us0 = ux * x_head[0] + uy * x_head[1] + uz * x_head[2]
+        us1 = ux * y_head[0] + uy * y_head[1] + uz * y_head[2]
+        us2 = ux * z_head[0] + uy * z_head[1] + uz * z_head[2]
 
-        pan = math.atan2(us[1], us[0])
-        tilt = math.asin(us[2])
+        pan = math.atan2(us1, us0)
+        tilt = math.atan2(us2, math.hypot(us0, us1))
         return [pan, tilt]

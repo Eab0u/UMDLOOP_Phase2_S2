@@ -9,7 +9,7 @@ from rclpy.qos import (
     HistoryPolicy,
 )
 from sensor_msgs.msg import JointState
-
+from std_msgs.msg import String, Empty
 from autotype_msgs.msg import JointVelocityCommand
 from my_typist.kinematics import ArmKinematics
 from my_typist.pid import PID
@@ -18,8 +18,6 @@ from my_typist.data import (
     DISTANCE_FROM_KEYBOARD,
     DT,
     FOREARM,
-    HEAD_PAN_LIMIT,
-    HEAD_TILT_LIMIT,
     JOINT_NAMES,
     KEY_LAYOUT,
     KEY_UNIT,
@@ -33,11 +31,12 @@ from my_typist.data import (
 )
 
 
+KEY = "P"
 KEYBOARD_CORNERS = [
-    (0.97, 0.17, 0.39),
-    (0.97, -0.14, 0.43),
-    (0.97, -0.15, 0.32),
-    (0.97, 0.12, 0.30),
+    (1.07599662905791, 0.200783625138841, 0.374876995935496),
+    (1.03800682995812, -0.138681282925482, 0.421226268874437),
+    (1.02851756549849, -0.150568592180247, 0.305319834998152),
+    (1.06678379540004, 0.188223530253409, 0.257635975726943),
 ]
 
 
@@ -58,6 +57,10 @@ class Typist(Node):
         self.kinematics = ArmKinematics()
         self.pids = [PID(kp, ki, kd, dt=DT) for _ in range(len(JOINT_NAMES))]
         self.q = [0.0] * len(JOINT_NAMES)
+        self.launch_key = ""
+        self.current_key = 0
+        self.current_state = "idle"
+        self.idle_time = 0
 
         self.joint_velocity_publisher = self.create_publisher(
             JointVelocityCommand,
@@ -68,6 +71,25 @@ class Typist(Node):
                 reliability=ReliabilityPolicy.RELIABLE,
             ),
         )
+        self.key_press_publisher = self.create_publisher(
+            Empty,
+            "/arm/press",
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.VOLATILE,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
+        self.done_publisher = self.create_publisher(
+            Empty,
+            "/sim/done",
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.VOLATILE,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
+
         self.create_subscription(
             JointState,
             "/joint_states",
@@ -79,24 +101,39 @@ class Typist(Node):
                 history=HistoryPolicy.KEEP_LAST,
             ),
         )
+        self.launch_key = self.create_subscription(
+            String,
+            "/sim/launch_key",
+            self.launch_key_callback,
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
 
         self.setup()
 
     def setup(self):
         self.get_arm_target(*KEYBOARD_CORNERS)
-        # self.get_stylus_target("J", *KEYBOARD_CORNERS)
-        self.stylus_target = KEYBOARD_CORNERS[0]
-
         q_des = self.kinematics.get_arm_joint_positions(*self.arm_target) or []
         print(f"Arm Angles: {[math.degrees(x) for x in q_des]}")
-        if len(q_des) > 0:
-            q_des = (
-                self.kinematics.get_stylus_joint_positions(*self.stylus_target, *q_des)
-                or []
-            )
-            print(f"Stylus Angles: {[math.degrees(x) for x in q_des]}")
 
+    def launch_key_callback(self, msg: String) -> None:
+        self.launch_key = msg.data
+        if len(self.launch_key) == 0:
+            self.get_logger().error(f"Invalid Launch Key {self.launch_key}")
+
+        self.get_logger().info(f"Recived Launch Key: {self.launch_key}")
+        self.current_state = "get_target"
+        self.current_key = 0
         self.create_timer(DT, self.control_loop)
+
+    def joint_state_callback(self, msg: JointState) -> None:
+        state = dict(zip(msg.name, msg.position))
+        for i, name in enumerate(JOINT_NAMES):
+            if name in state:
+                self.q[i] = float(state[name])
 
     def get_arm_target(self, kb_tl, kb_tr, kb_br, kb_bl):
         corners = [kb_tl, kb_tr, kb_br, kb_bl]
@@ -159,66 +196,96 @@ class Typist(Node):
 
     def get_stylus_target(self, key, kb_tl, kb_tr, kb_br, kb_bl):
         key = key.upper()
+
         if key not in KEY_LAYOUT:
             self.get_logger().error(f"Unknown key: {key}")
             return
 
         x, y, width = KEY_LAYOUT[key]
 
-        # Keyboard layout dimensions.
-        # Main keyboard: x = 0..15, y = 0..6.25
-        # Navigation cluster: x = 15.25..18.5
-        if x >= 15.25:
-            x_min, x_max = 15.25, 18.5
-        else:
-            x_min, x_max = 0.0, 15.0
+        u = (x + width / 2.0) * KEY_UNIT
+        v = (y + 0.5) * KEY_UNIT
 
-        y_min, y_max = 0.0, 6.25
+        keyboard_width = 18.25 * KEY_UNIT
+        keyboard_height = 6.25 * KEY_UNIT
 
-        # Center of the key in layout coordinates.
-        u = (x + width / 2.0 - x_min) / (x_max - x_min)
-        v = (y + 0.5 - y_min) / (y_max - y_min)
+        s = u / keyboard_width
+        t = v / keyboard_height
 
-        # Bilinear interpolation over the keyboard surface.
-        top = [kb_tl[i] + u * (kb_tr[i] - kb_tl[i]) for i in range(3)]
-        bottom = [kb_bl[i] + u * (kb_br[i] - kb_bl[i]) for i in range(3)]
-
-        self.stylus_target = tuple(top[i] + v * (bottom[i] - top[i]) for i in range(3))
+        # Bilinear interpolation
+        self.stylus_target = (
+            (1 - s) * (1 - t) * kb_tl[0]
+            + s * (1 - t) * kb_tr[0]
+            + s * t * kb_br[0]
+            + (1 - s) * t * kb_bl[0],
+            (1 - s) * (1 - t) * kb_tl[1]
+            + s * (1 - t) * kb_tr[1]
+            + s * t * kb_br[1]
+            + (1 - s) * t * kb_bl[1],
+            (1 - s) * (1 - t) * kb_tl[2]
+            + s * (1 - t) * kb_tr[2]
+            + s * t * kb_br[2]
+            + (1 - s) * t * kb_bl[2],
+        )
 
         self.get_logger().info(f"Stylus Target: {self.stylus_target}")
 
-    def joint_state_callback(self, msg: JointState) -> None:
-        state = dict(zip(msg.name, msg.position))
-        for i, name in enumerate(JOINT_NAMES):
-            if name in state:
-                self.q[i] = float(state[name])
-        # q_des = self.kinematics.get_arm_joint_positions(*self.arm_target)
-        # print(f"Arm Position: {q_des}")
-
     def control_loop(self) -> None:
         velocities = [0.0] * len(JOINT_NAMES)
-
-        q_arm = self.kinematics.get_arm_joint_positions(*self.arm_target)
-        if q_arm is None:
-            self.get_logger().warning("target out of reach", throttle_duration_sec=1.0)
-            return
-
-        q_stylus = self.kinematics.get_stylus_joint_positions(
-            *self.stylus_target, *q_arm
-        )
-        if q_stylus is None:
-            self.get_logger().warning(
-                "stylus cannot reach from desired arm pose",
-                throttle_duration_sec=1.0,
+        if self.current_state == "get_target":
+            self.get_stylus_target(self.launch_key[self.current_key], *KEYBOARD_CORNERS)
+            self.get_logger().info(
+                f"Calculated Stylus Target for key {
+                    self.launch_key[self.current_key]
+                }: {self.stylus_target}"
             )
-            return
+            self.current_state = "moving"
+        elif self.current_state == "next":
+            if self.idle_time > 0:
+                self.idle_time -= DT
+            else:
+                self.get_logger().info(
+                    f"Pressing Key {self.launch_key[self.current_key]}"
+                )
+                self.key_press_publisher.publish(Empty())
+                self.current_key += 1
+                if self.current_key >= len(self.launch_key):
+                    self.get_logger().info(
+                        f"Finished Launch Key: {self.launch_key}, Sending Done"
+                    )
+                    self.done_publisher.publish(Empty())
+                    self.current_state = "idle"
+                    return
+                else:
+                    self.current_state = "get_target"
+        else:
+            q_arm = self.kinematics.get_arm_joint_positions(*self.arm_target)
+            if q_arm is None:
+                self.get_logger().warning(
+                    "target out of reach", throttle_duration_sec=1.0
+                )
+                return
 
-        q_des = list(q_arm) + list(q_stylus)
+            q_stylus = self.kinematics.get_stylus_joint_positions(
+                *self.stylus_target, *self.q[:3]
+            )
+            if q_stylus is None:
+                self.get_logger().warning(
+                    "stylus cannot reach from desired arm pose",
+                    throttle_duration_sec=1.0,
+                )
+                return
 
-        for i, pid in enumerate(self.pids):
-            if i >= len(q_des):
-                continue
-            velocities[i] = pid.update(q_des[i] - self.q[i], DT)
+            q_des = [i for i in q_arm] + [i for i in q_stylus]
+
+            for i, pid in enumerate(self.pids):
+                if i >= len(q_des) or q_des[i] is None:
+                    continue
+                velocities[i] = pid.update(q_des[i] - self.q[i], DT)
+
+            if all(abs(v) < 1e-2 for v in velocities):
+                self.idle_time = 0.5
+                self.current_state = "next"
 
         msg = JointVelocityCommand()
         msg.header.stamp = self.get_clock().now().to_msg()

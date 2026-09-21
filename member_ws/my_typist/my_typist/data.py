@@ -9,8 +9,8 @@ FOREARM = 0.4
 STYLUS_MIN_REACH = 0.05
 STYLUS_MAX_REACH = 0.35
 
-DISTANCE_FROM_KEYBOARD = 0.12
-KEYBOARD_CENTER_OFFSET = 0.025
+DISTANCE_FROM_KEYBOARD = 0.15
+KEYBOARD_CENTER_OFFSET = 0
 KEYBOARD_VIEW_OFFSET = 0.05
 
 JOINT_NAMES = [
@@ -141,24 +141,5 @@ def cross(a, b):
     )
 
 
-def normalized(a):
-    length = math.hypot(*a)
-    return tuple(ai / length for ai in a)
-
-
 def dist(a, b):
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
-
-
-# Gaussian Elimination
-def solve(A, b):
-    n = len(b)
-    M = [A[i][:] + [b[i]] for i in range(n)]
-    for col in range(n):
-        for row in range(col + 1, n):
-            factor = M[row][col] / M[col][col]
-            M[row] = [M[row][k] - factor * M[col][k] for k in range(n + 1)]
-    x = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        x[i] = (M[i][n] - sum(M[i][j] * x[j] for j in range(i + 1, n))) / M[i][i]
-    return x
