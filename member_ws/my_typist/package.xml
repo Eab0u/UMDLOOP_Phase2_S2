@@ -3,7 +3,7 @@
 <package format="3">
   <name>my_typist</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Autonomous camera-guided keyboard typing node for UMD Loop S2</description>
   <maintainer email="member@todo.todo">member</maintainer>
   <license>MIT</license>
 
@@ -14,6 +14,9 @@
   <depend>geometry_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>autotype_msgs</depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
