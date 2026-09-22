@@ -19,3 +19,4 @@ __pycache__/
 
 # logs
 control_log.csv
+perception_log.csv
